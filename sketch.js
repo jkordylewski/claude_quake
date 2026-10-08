@@ -6,7 +6,7 @@ let quakes = [];
 let land = []; // array of rings, each an array of [lon, lat]
 let paint; // persistent layer holding the drip trails
 
-const DRIFT = 0.01; // degrees of longitude the earth turns per frame (eastward)
+const DRIFT = 0.02; // degrees of longitude the earth turns per frame (eastward)
 
 const RING_ALPHA = 45; // peak opacity (0-100) of the pulsing epicenter rings
 
@@ -15,6 +15,11 @@ const OUTLINE_ALPHA = 18 * 0.7; // peak stroke alpha (0-100)
 const OUTLINE_FADE_IN = 0.02; // fraction of the gap closed per frame
 const OUTLINE_FADE_OUT = 0.08;
 let hovering = false;
+
+const REC_SECONDS = 30;
+const REC_SIZE = 1080; // square output, pixels
+let recording = false;
+let recCanvas, recCtx;
 let outlineAlpha = 0;
 
 // The canvas is square and shows 180 degrees of longitude by 180 of latitude,
@@ -42,18 +47,21 @@ function setup() {
   makePaint();
   // low-res (110m) Natural Earth coastlines: deliberately rough
   loadJSON(
-    'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_land.geojson',
-    data => {
+    "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_land.geojson",
+    (data) => {
       for (const f of data.features) {
-        const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+        const polys =
+          f.geometry.type === "Polygon"
+            ? [f.geometry.coordinates]
+            : f.geometry.coordinates;
         for (const poly of polys) land.push(...poly);
       }
-    }
+    },
   );
   loadJSON(
-    'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson',
-    data => {
-      quakes = data.features.map(f => {
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson",
+    (data) => {
+      quakes = data.features.map((f) => {
         const mag = max(f.properties.mag || 0, 0.5);
         return {
           lon: f.geometry.coordinates[0],
@@ -64,7 +72,7 @@ function setup() {
           drip: newDrip(mag, random(0, 600)),
         };
       });
-    }
+    },
   );
 }
 
@@ -112,8 +120,8 @@ function draw() {
   // continent outlines, faded in on hover and out again on hover off
   outlineAlpha = lerp(
     outlineAlpha,
-    hovering ? OUTLINE_ALPHA : 0,
-    hovering ? OUTLINE_FADE_IN : OUTLINE_FADE_OUT
+    hovering && !recording ? OUTLINE_ALPHA : 0, // outlines stay hidden while recording
+    hovering && !recording ? OUTLINE_FADE_IN : OUTLINE_FADE_OUT,
   );
   if (outlineAlpha > 0.1) {
     noFill();
@@ -166,6 +174,52 @@ function draw() {
       noFill();
     }
   }
+
+  if (recording)
+    recCtx.drawImage(drawingContext.canvas, 0, 0, REC_SIZE, REC_SIZE);
+}
+
+// Press R to record a clean REC_SECONDS clip (no cursor or page chrome) and
+// download it. Keep this tab visible while it records.
+function keyPressed() {
+  if (key === "r" || key === "R") startRecording();
+}
+
+function startRecording() {
+  if (recording || typeof MediaRecorder === "undefined") return;
+
+  recCanvas = document.createElement("canvas");
+  recCanvas.width = recCanvas.height = REC_SIZE;
+  recCtx = recCanvas.getContext("2d");
+
+  // prefer mp4 (what Instagram wants); Chrome falls back to webm
+  const mimeType = [
+    "video/mp4;codecs=avc1",
+    "video/webm;codecs=vp9",
+    "video/webm",
+  ].find((t) => MediaRecorder.isTypeSupported(t));
+  const rec = new MediaRecorder(recCanvas.captureStream(60), {
+    mimeType,
+    videoBitsPerSecond: 12e6,
+  });
+  const chunks = [];
+  const title = document.title;
+
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec.onstop = () => {
+    recording = false;
+    document.title = title;
+    const ext = rec.mimeType.startsWith("video/mp4") ? "mp4" : "webm";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
+    a.download = `claude_quake.${ext}`;
+    a.click();
+  };
+
+  recording = true;
+  document.title = "● recording";
+  rec.start();
+  setTimeout(() => rec.stop(), REC_SECONDS * 1000);
 }
 
 function updateDrip(q, x, y, hue) {
