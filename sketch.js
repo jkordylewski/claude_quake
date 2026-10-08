@@ -8,17 +8,35 @@ let paint; // persistent layer holding the drip trails
 
 const DRIFT = 0.01; // degrees of longitude the earth turns per frame (eastward)
 
+const RING_ALPHA = 45; // peak opacity (0-100) of the pulsing epicenter rings
+
+// continent outlines are hidden until the pointer is over the canvas
+const OUTLINE_ALPHA = 18 * 0.7; // peak stroke alpha (0-100)
+const OUTLINE_FADE_IN = 0.02; // fraction of the gap closed per frame
+const OUTLINE_FADE_OUT = 0.08;
+let hovering = false;
+let outlineAlpha = 0;
+
+// The canvas is square and shows 180 degrees of longitude by 180 of latitude,
+// the same scale on both axes (no stretching). The rest of the world is cropped
+// off-screen and drifts into view as the earth turns.
+function canvasSize() {
+  return min(windowWidth, windowHeight);
+}
+
 // screen position of a lon/lat on the currently drifted earth
 function lonToX(lon) {
   const l = ((((lon + frameCount * DRIFT + 180) % 360) + 360) % 360) - 180;
-  return map(l, -180, 180, 0, width);
+  return width / 2 + (l * width) / 180;
 }
 function latToY(lat) {
   return map(lat, 90, -90, 0, height);
 }
 
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  const cnv = createCanvas(canvasSize(), canvasSize());
+  cnv.mouseOver(() => (hovering = true));
+  cnv.mouseOut(() => (hovering = false));
   colorMode(HSB, 360, 100, 100, 100);
   background(240, 40, 6);
   makePaint();
@@ -91,24 +109,31 @@ function draw() {
     paint.noErase();
   }
 
-  // faint continent outlines
-  noFill();
-  stroke(220, 20, 90, 18);
-  strokeWeight(1);
-  for (const ring of land) {
-    beginShape();
-    let prevX = null;
-    for (const [lon, lat] of ring) {
-      const x = lonToX(lon);
-      // start a new stroke when the outline wraps around the map edge
-      if (prevX !== null && abs(x - prevX) > width / 2) {
-        endShape();
-        beginShape();
+  // continent outlines, faded in on hover and out again on hover off
+  outlineAlpha = lerp(
+    outlineAlpha,
+    hovering ? OUTLINE_ALPHA : 0,
+    hovering ? OUTLINE_FADE_IN : OUTLINE_FADE_OUT
+  );
+  if (outlineAlpha > 0.1) {
+    noFill();
+    stroke(220, 20, 90, outlineAlpha);
+    strokeWeight(1);
+    for (const ring of land) {
+      beginShape();
+      let prevX = null;
+      for (const [lon, lat] of ring) {
+        const x = lonToX(lon);
+        // start a new stroke when the outline wraps around the map edge
+        if (prevX !== null && abs(x - prevX) > width) {
+          endShape();
+          beginShape();
+        }
+        vertex(x, latToY(lat));
+        prevX = x;
       }
-      vertex(x, latToY(lat));
-      prevX = x;
+      endShape();
     }
-    endShape();
   }
 
   for (const q of quakes) {
@@ -128,7 +153,7 @@ function draw() {
     const t = ((frameCount + q.phase) % 120) / 120; // 0..1 pulse
     const hue = map(constrain(q.depth, 0, 300), 0, 300, 20, 260);
 
-    stroke(hue, 70, 100, (1 - t) * 80);
+    stroke(hue, 70, 100, pow(1 - t, 1.5) * RING_ALPHA);
     strokeWeight(1 + q.mag * 0.3);
     circle(x, y, t * maxR * 2);
 
@@ -148,6 +173,11 @@ function updateDrip(q, x, y, hue) {
 
   if (!d.running) {
     if (--d.wait > 0) return;
+    // epicenters currently cropped off-screen don't drip; try again later
+    if (x < 0 || x > width) {
+      d.wait = random(60, 300);
+      return;
+    }
     d.running = true;
     d.dy = 0;
     d.age = 0;
@@ -184,7 +214,7 @@ function updateDrip(q, x, y, hue) {
 }
 
 function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
+  resizeCanvas(canvasSize(), canvasSize());
   background(240, 40, 6);
   makePaint();
   for (const q of quakes) {
