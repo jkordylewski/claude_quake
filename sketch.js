@@ -53,6 +53,7 @@ function setup() {
 function makePaint() {
   paint = createGraphics(width, height);
   paint.colorMode(HSB, 360, 100, 100, 100);
+  paint.strokeCap(SQUARE); // clean start to each trail
 }
 
 function newDrip(mag, wait) {
@@ -133,7 +134,7 @@ function draw() {
 
     // bead of paint at the head of a running drip
     const d = q.drip;
-    if (d.running) {
+    if (d.running && d.dy > d.w) {
       noStroke();
       fill(hue, 80, 100, 95);
       circle(d.x, d.y + d.dy, d.w);
@@ -147,16 +148,12 @@ function updateDrip(q, x, y, hue) {
 
   if (!d.running) {
     if (--d.wait > 0) return;
-    // start: a blob of paint lands on the epicenter
     d.running = true;
     d.dy = 0;
     d.age = 0;
     // pin the drip to where the epicenter is right now; the earth drifts on without it
     d.x = x + random(-2, 2);
     d.y = y;
-    paint.noStroke();
-    paint.fill(hue, 80, 100, 90);
-    paint.circle(d.x, d.y, d.w * 1.6);
     return;
   }
 
@@ -168,9 +165,12 @@ function updateDrip(q, x, y, hue) {
   d.dy += step;
   d.age++;
 
-  paint.stroke(hue, 80, 95, 85);
-  paint.strokeWeight(d.w * 0.5);
-  paint.line(d.x, d.y + prev, d.x, d.y + d.dy);
+  // skip zero-length segments: with a round cap they would stamp a dot
+  if (step > 0.01) {
+    paint.stroke(hue, 80, 95, 85);
+    paint.strokeWeight(d.w * 0.5);
+    paint.line(d.x, d.y + prev, d.x, d.y + d.dy);
+  }
 
   if (ease < 0.03 || d.age > 900) {
     // dried: leave a bulb at the end of the run
