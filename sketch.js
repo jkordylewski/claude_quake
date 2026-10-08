@@ -2,11 +2,22 @@
 // Size = magnitude, hue = depth (shallow warm, deep cool).
 
 let quakes = [];
+let land = []; // array of rings, each an array of [lon, lat]
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   colorMode(HSB, 360, 100, 100, 100);
   background(240, 40, 6);
+  // low-res (110m) Natural Earth coastlines: deliberately rough
+  loadJSON(
+    'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_land.geojson',
+    data => {
+      for (const f of data.features) {
+        const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+        for (const poly of polys) land.push(...poly);
+      }
+    }
+  );
   loadJSON(
     'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson',
     data => {
@@ -27,7 +38,18 @@ function draw() {
   fill(240, 40, 6, 12);
   rect(0, 0, width, height);
 
+  // faint continent outlines
   noFill();
+  stroke(220, 20, 90, 18);
+  strokeWeight(1);
+  for (const ring of land) {
+    beginShape();
+    for (const [lon, lat] of ring) {
+      vertex(map(lon, -180, 180, 0, width), map(lat, 90, -90, 0, height));
+    }
+    endShape();
+  }
+
   for (const q of quakes) {
     const x = map(q.lon, -180, 180, 0, width);
     const y = map(q.lat, 90, -90, 0, height);
