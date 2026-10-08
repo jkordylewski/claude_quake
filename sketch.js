@@ -6,6 +6,17 @@ let quakes = [];
 let land = []; // array of rings, each an array of [lon, lat]
 let paint; // persistent layer holding the drip trails
 
+const DRIFT = 0.01; // degrees of longitude the earth turns per frame (eastward)
+
+// screen position of a lon/lat on the currently drifted earth
+function lonToX(lon) {
+  const l = ((((lon + frameCount * DRIFT + 180) % 360) + 360) % 360) - 180;
+  return map(l, -180, 180, 0, width);
+}
+function latToY(lat) {
+  return map(lat, 90, -90, 0, height);
+}
+
 function setup() {
   createCanvas(windowWidth, windowHeight);
   colorMode(HSB, 360, 100, 100, 100);
@@ -49,11 +60,19 @@ function newDrip(mag, wait) {
     wait, // frames until the drip starts
     running: false,
     dy: 0, // pixels travelled down from the epicenter
-    offX: 0,
+    x: 0, // screen position the drip is pinned to while it runs
+    y: 0,
     age: 0,
     seed: random(1000),
-    maxLen: (30 + mag * 40) * random(0.6, 1.3),
-    w: 1.5 + mag * 0.8,
+    ...dripSize(mag),
+  };
+}
+
+// mostly slim drips with the occasional fat one, and lengths that vary freely
+function dripSize(mag) {
+  return {
+    w: (1.5 + mag * 0.8) * (0.5 + pow(random(), 1.5) * 2.4),
+    maxLen: (30 + mag * 40) * random(0.5, 1.6),
   };
 }
 
@@ -77,15 +96,23 @@ function draw() {
   strokeWeight(1);
   for (const ring of land) {
     beginShape();
+    let prevX = null;
     for (const [lon, lat] of ring) {
-      vertex(map(lon, -180, 180, 0, width), map(lat, 90, -90, 0, height));
+      const x = lonToX(lon);
+      // start a new stroke when the outline wraps around the map edge
+      if (prevX !== null && abs(x - prevX) > width / 2) {
+        endShape();
+        beginShape();
+      }
+      vertex(x, latToY(lat));
+      prevX = x;
     }
     endShape();
   }
 
   for (const q of quakes) {
-    const x = map(q.lon, -180, 180, 0, width);
-    const y = map(q.lat, 90, -90, 0, height);
+    const x = lonToX(q.lon);
+    const y = latToY(q.lat);
     const hue = map(constrain(q.depth, 0, 300), 0, 300, 20, 260);
     updateDrip(q, x, y, hue);
   }
@@ -94,8 +121,8 @@ function draw() {
 
   noFill();
   for (const q of quakes) {
-    const x = map(q.lon, -180, 180, 0, width);
-    const y = map(q.lat, 90, -90, 0, height);
+    const x = lonToX(q.lon);
+    const y = latToY(q.lat);
     const maxR = q.mag * 14;
     const t = ((frameCount + q.phase) % 120) / 120; // 0..1 pulse
     const hue = map(constrain(q.depth, 0, 300), 0, 300, 20, 260);
@@ -109,7 +136,7 @@ function draw() {
     if (d.running) {
       noStroke();
       fill(hue, 80, 100, 95);
-      circle(x + d.offX, y + d.dy, d.w);
+      circle(d.x, d.y + d.dy, d.w);
       noFill();
     }
   }
@@ -124,10 +151,12 @@ function updateDrip(q, x, y, hue) {
     d.running = true;
     d.dy = 0;
     d.age = 0;
-    d.offX = random(-2, 2);
+    // pin the drip to where the epicenter is right now; the earth drifts on without it
+    d.x = x + random(-2, 2);
+    d.y = y;
     paint.noStroke();
     paint.fill(hue, 80, 100, 90);
-    paint.circle(x + d.offX, y, d.w * 1.6);
+    paint.circle(d.x, d.y, d.w * 1.6);
     return;
   }
 
@@ -141,16 +170,16 @@ function updateDrip(q, x, y, hue) {
 
   paint.stroke(hue, 80, 95, 85);
   paint.strokeWeight(d.w * 0.5);
-  paint.line(x + d.offX, y + prev, x + d.offX, y + d.dy);
+  paint.line(d.x, d.y + prev, d.x, d.y + d.dy);
 
   if (ease < 0.03 || d.age > 900) {
     // dried: leave a bulb at the end of the run
     paint.noStroke();
     paint.fill(hue, 80, 100, 90);
-    paint.circle(x + d.offX, y + d.dy, d.w * 1.1);
+    paint.circle(d.x, d.y + d.dy, d.w * 1.1);
     d.running = false;
     d.wait = random(300, 900);
-    d.maxLen = (30 + q.mag * 40) * random(0.6, 1.3);
+    Object.assign(d, dripSize(q.mag));
   }
 }
 
